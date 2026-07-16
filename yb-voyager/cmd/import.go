@@ -37,7 +37,8 @@ var targetDBPassword string
 var sourceDBType string
 var enableOrafce utils.BoolStr
 var importType string
-var prometheusMetricsPort int
+var prometheusMetricsPort int // deprecated alias for --metrics-port
+var metricsPort int           // bound to --metrics-port; 0 = disabled
 var importUsePartitionRoot utils.BoolStr // default is true for backward compatibility
 
 var supportedSSLModesOnTargetForImport = AllSSLModes // supported SSL modes for YugabyteDB is different for import VS export data from target(streaming phase)
@@ -461,6 +462,9 @@ Note that for the cases where a table doesn't have a primary key, this may lead 
 	cmd.Flags().IntVar(&prometheusMetricsPort, "prometheus-metrics-port", 0,
 		"Port for Prometheus metrics server (default: 9101)")
 	cmd.Flags().MarkHidden("prometheus-metrics-port")
+
+	cmd.Flags().IntVar(&metricsPort, "metrics-port", 0,
+		"Port to expose Prometheus metrics on (0 disables). Serves GET /metrics.")
 }
 
 func registerImportSchemaFlags(cmd *cobra.Command) {
