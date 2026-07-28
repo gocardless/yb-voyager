@@ -153,10 +153,10 @@ func streamChanges(state *ImportDataState, tableNames []sqlname.NameTuple) error
 		return fmt.Errorf("error handling cdc partitioning strategy: %w", err)
 	}
 
-	if !disablePb {
+	{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go statsReporter.ReportStats(ctx)
+		go statsReporter.ReportStats(ctx, !bool(disablePb))
 		defer statsReporter.Finalize()
 	}
 
@@ -666,8 +666,8 @@ func processEvents(chanNo int, evChan chan *tgtdb.Event, lastAppliedVsn int64, d
 // target DB (the DB that actually enforces unique constraints). Oracle import targets
 // always use PARTITION_BY_TABLE (see getCdcPartitioningStrategyPerTable), so conflict
 // detection never runs for them and their target driver returns an empty map.
-//Attribute name registry is not required here as for the PG->YB migrations the attribute name is same in both the places - event's fields coming from source and unique-index-column mapping coming from target and 
-//And this path is only for PG->YB migrations as of now.
+// Attribute name registry is not required here as for the PG->YB migrations the attribute name is same in both the places - event's fields coming from source and unique-index-column mapping coming from target and
+// And this path is only for PG->YB migrations as of now.
 // This path assumes that the column name remains same in PG->YB migrations.
 func initializeConflictDetectionCache(evChans []chan *tgtdb.Event, sourceDBTypeForConflictCache string, importTableList []sqlname.NameTuple) error {
 	log.Infof("fetching table to unique indexes map from import target (%s)", tconf.TargetDBType)
