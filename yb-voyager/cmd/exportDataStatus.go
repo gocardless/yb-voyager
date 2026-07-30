@@ -165,7 +165,7 @@ func exportDataStatus(ctx context.Context, tablesProgressMetadata map[string]*ut
 				go startExportPB(progressContainer, key, quitChan2, disablePb)
 			} else if tablesProgressMetadata[key].Status == utils.TABLE_MIGRATION_DONE || (tablesProgressMetadata[key].Status == utils.TABLE_MIGRATION_NOT_STARTED && safeExit) {
 				tablesProgressMetadata[key].Status = utils.TABLE_MIGRATION_COMPLETED
-				exportedTables = append(exportedTables, key)
+				exportedTables = append(exportedTables, tablesProgressMetadata[key].TableName.ForMinOutput())
 				doneCount++
 
 				if exporterRole == SOURCE_DB_EXPORTER_ROLE {
@@ -207,8 +207,8 @@ func exportDataStatus(ctx context.Context, tablesProgressMetadata map[string]*ut
 }
 
 func startExportPB(progressContainer *mpb.Progress, mapKey string, quitChan chan bool, disablePb bool) {
-	tableName := mapKey
 	tableMetadata := tablesProgressMetadata[mapKey]
+	tableName := tableMetadata.TableName.ForMinOutput()
 
 	pbr := pbreporter.NewExportPB(progressContainer, tableName, disablePb)
 	// initialize PB total with identified approx row count
@@ -247,7 +247,7 @@ func startExportPB(progressContainer *mpb.Progress, mapKey string, quitChan chan
 			time.Sleep(time.Millisecond * 500)
 
 			if exporterRole == SOURCE_DB_EXPORTER_ROLE {
-				exportDataTableMetrics := createUpdateExportedRowCountEventList([]string{tableName})
+				exportDataTableMetrics := createUpdateExportedRowCountEventList([]string{mapKey})
 				// The metrics are sent after evry 5 secs in implementation of UpdateExportedRowCount
 				controlPlane.UpdateExportedRowCount(exportDataTableMetrics)
 			}
