@@ -1,6 +1,6 @@
 module github.com/yugabyte/yb-voyager/yb-voyager
 
-go 1.24.2
+go 1.25.0
 
 require (
 	cloud.google.com/go/storage v1.38.0
@@ -47,7 +47,7 @@ require (
 	github.com/vbauerster/mpb/v8 v8.4.0
 	gocloud.dev v0.29.0
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
-	golang.org/x/term v0.31.0
+	golang.org/x/term v0.43.0
 	google.golang.org/api v0.169.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gotest.tools v2.2.0+incompatible
@@ -179,12 +179,12 @@ require (
 	github.com/spf13/pflag v1.0.5
 	github.com/subosito/gotenv v1.4.1 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	golang.org/x/crypto v0.37.0 // indirect
-	golang.org/x/net v0.26.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/net v0.54.0 // indirect
 	golang.org/x/oauth2 v0.18.0 // indirect
-	golang.org/x/sync v0.13.0
-	golang.org/x/sys v0.32.0 // indirect
-	golang.org/x/text v0.24.0
+	golang.org/x/sync v0.20.0
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
 	google.golang.org/genproto v0.0.0-20240213162025-012b6fc9bca9 // indirect
