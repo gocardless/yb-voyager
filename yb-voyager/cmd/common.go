@@ -90,28 +90,42 @@ func PrintElapsedDuration() {
 		timeTakenByCurrentVoyagerInvocation.Seconds())
 }
 
-func updateFilePaths(source *srcdb.Source, exportDir string, tablesProgressMetadata map[string]*utils.TableProgressMetadata) {
-	var requiredMap map[string]string
+// expandSegmentEntries replaces each single table entry with one entry per
+// dumped segment file, sharing the table's TableName. Single-file tables keep
+// a single entry (seg0). Keys are deterministic for resume.
+func expandSegmentEntries(md map[string]*utils.TableProgressMetadata, exportDir string, fileMap map[string][]string) {
+	for _, key := range utils.GetSortedKeys(md) {
+		meta := md[key]
+		files := fileMap[meta.TableName.ForKey()]
+		if len(files) == 0 {
+			log.Infof("deleting an entry %q from tablesProgressMetadata: ", key)
+			delete(md, key)
+			continue
+		}
+		sort.Strings(files)
+		table := meta.TableName.ForMinOutput()
+		for i, f := range files {
+			final := filepath.Join(exportDir, "data", table+"_data.sql")
+			if i > 0 {
+				final = filepath.Join(exportDir, "data", fmt.Sprintf("%s_data.%d.sql", table, i))
+			}
+			seg := *meta // copy
+			seg.InProgressFilePath = filepath.Join(exportDir, "data", f)
+			seg.FinalFilePath = final
+			md[fmt.Sprintf("%s::seg%d", key, i)] = &seg
+		}
+		delete(md, key)
+	}
+}
 
+func updateFilePaths(source *srcdb.Source, exportDir string, tablesProgressMetadata map[string]*utils.TableProgressMetadata) {
 	// TODO: handle the case if table name has double quotes/case sensitive
 
-	sortedKeys := utils.GetSortedKeys(tablesProgressMetadata)
 	if source.DBType == "postgresql" {
-		requiredMap = getMappingForTableNameVsTableFileName(filepath.Join(exportDir, "data"), false)
-		for _, key := range sortedKeys {
-			tableName := tablesProgressMetadata[key].TableName
-			fullTableName := tableName.ForKey()
-			table := tableName.ForMinOutput()
-			if _, ok := requiredMap[fullTableName]; ok { // checking if toc/dump has data file for table
-				tablesProgressMetadata[key].InProgressFilePath = filepath.Join(exportDir, "data", requiredMap[fullTableName])
-				tablesProgressMetadata[key].FinalFilePath = filepath.Join(exportDir, "data", table+"_data.sql")
-			} else {
-				log.Infof("deleting an entry %q from tablesProgressMetadata: ", key)
-				delete(tablesProgressMetadata, key)
-			}
-		}
+		requiredMap := getMappingForTableNameVsTableFileName(filepath.Join(exportDir, "data"), false)
+		expandSegmentEntries(tablesProgressMetadata, exportDir, requiredMap)
 	} else if source.DBType == "oracle" || source.DBType == "mysql" {
-		for _, key := range sortedKeys {
+		for _, key := range utils.GetSortedKeys(tablesProgressMetadata) {
 			_, tname := tablesProgressMetadata[key].TableName.ForCatalogQuery()
 			targetTableName := tname
 			tablesProgressMetadata[key].InProgressFilePath = filepath.Join(exportDir, "data", "tmp_"+targetTableName+"_data.sql")
@@ -120,13 +134,52 @@ func updateFilePaths(source *srcdb.Source, exportDir string, tablesProgressMetad
 	}
 
 	logMsg := "After updating data file paths, TablesProgressMetadata:"
-	for _, key := range sortedKeys {
+	for _, key := range utils.GetSortedKeys(tablesProgressMetadata) {
 		logMsg += fmt.Sprintf("%+v\n", tablesProgressMetadata[key])
 	}
 	log.Info(logMsg)
 }
 
-func getMappingForTableNameVsTableFileName(dataDirPath string, noWait bool) map[string]string {
+// parseTocDataLine parses one `pg_restore -l` line. Descriptions may be
+// "TABLE DATA" or the chunking patch's "TABLE DATA (pages M:N)"; the trailing
+// three space-separated tokens are always schema, table, owner.
+func parseTocDataLine(line string) (schema, table, owner string, isTableData bool, dumpID string) {
+	parts := strings.Split(line, " ")
+	if len(parts) < 8 || parts[3] != "TABLE" || parts[4] != "DATA" {
+		return "", "", "", false, ""
+	}
+	owner = parts[len(parts)-1]
+	table = parts[len(parts)-2]
+	schema = parts[len(parts)-3]
+	dumpID = strings.Trim(parts[0], ";")
+	return schema, table, owner, true, dumpID
+}
+
+// buildTableFileMap maps each table's registry key to every segment file
+// dumped for it (chunked tables get one entry per page-range segment;
+// unchunked tables get a single-element slice).
+func buildTableFileMap(lines []string) map[string][]string {
+	out := make(map[string][]string)
+	for _, line := range lines {
+		schema, table, _, isTableData, dumpID := parseTocDataLine(line)
+		if !isTableData {
+			continue
+		}
+		if nameContainsCapitalLetter(table) || sqlname.IsReservedKeywordPG(table) {
+			// Surround the table name with double quotes.
+			table = fmt.Sprintf("\"%s\"", table)
+		}
+		full := fmt.Sprintf("%s.%s", schema, table)
+		nt, err := namereg.NameReg.LookupTableName(full)
+		if err != nil {
+			utils.ErrExit("lookup table in name registry: %q: %v", full, err)
+		}
+		out[nt.ForKey()] = append(out[nt.ForKey()], dumpID+".dat")
+	}
+	return out
+}
+
+func getMappingForTableNameVsTableFileName(dataDirPath string, noWait bool) map[string][]string {
 	tocTextFilePath := filepath.Join(dataDirPath, "toc.txt")
 	if noWait && !utils.FileOrFolderExists(tocTextFilePath) { // to avoid infine wait for export data status command
 		return nil
@@ -149,32 +202,10 @@ func getMappingForTableNameVsTableFileName(dataDirPath string, noWait bool) map[
 		utils.ErrExit("couldn't parse the TOC file to collect the tablenames for data files: %v", err)
 	}
 
-	tableNameVsFileNameMap := make(map[string]string)
 	var sequencesPostData strings.Builder
 
 	lines := strings.Split(string(stdOut), "\n")
-	for _, line := range lines {
-		// example of line: 3725; 0 16594 TABLE DATA public categories ds2
-		parts := strings.Split(line, " ")
-
-		if len(parts) < 8 { // those lines don't contain table/sequences related info
-			continue
-		} else if parts[3] == "TABLE" && parts[4] == "DATA" {
-			fileName := strings.Trim(parts[0], ";") + ".dat"
-			schemaName := parts[5]
-			tableName := parts[6]
-			if nameContainsCapitalLetter(tableName) || sqlname.IsReservedKeywordPG(tableName) {
-				// Surround the table name with double quotes.
-				tableName = fmt.Sprintf("\"%s\"", tableName)
-			}
-			fullTableName := fmt.Sprintf("%s.%s", schemaName, tableName)
-			table, err := namereg.NameReg.LookupTableName(fullTableName)
-			if err != nil {
-				utils.ErrExit("lookup table in name registry: %q: %v", fullTableName, err)
-			}
-			tableNameVsFileNameMap[table.ForKey()] = fileName
-		}
-	}
+	tableNameVsFileNameMap := buildTableFileMap(lines)
 
 	tocTextFileDataBytes, err := os.ReadFile(tocTextFilePath)
 	if err != nil {

@@ -52,6 +52,18 @@ type ExportSnapshotStatus struct {
 	Tables map[string]*TableExportStatus `json:"tables"`
 }
 
+// ensureSnapshotStatusEntry lazily inserts a status entry for keys that only
+// become known after chunked segments are expanded (see expandSegmentEntries),
+// so per-segment progress keys have somewhere to record status.
+func ensureSnapshotStatusEntry(status *ExportSnapshotStatus, key string, tableName string) {
+	if status.Tables == nil {
+		status.Tables = map[string]*TableExportStatus{}
+	}
+	if status.Tables[key] == nil {
+		status.Tables[key] = &TableExportStatus{TableName: tableName}
+	}
+}
+
 func (e *ExportSnapshotStatus) GetTableStatusByTableName(tableName string) []*TableExportStatus {
 	var tableStatus []*TableExportStatus
 	for _, v := range e.Tables {
@@ -300,6 +312,7 @@ func updateExportSnapshotStatus(ctx context.Context, tableMetadata map[string]*u
 		default:
 			err := exportSnapshotStatusFile.Update(func(status *ExportSnapshotStatus) {
 				for key := range tablesProgressMetadata {
+					ensureSnapshotStatusEntry(status, key, tablesProgressMetadata[key].TableName.ForKey())
 					status.Tables[key].ExportedRowCountSnapshot = tablesProgressMetadata[key].CountLiveRows
 					status.Tables[key].Status = utils.TableMetadataStatusMap[tablesProgressMetadata[key].Status]
 					status.Tables[key].FileName = tablesProgressMetadata[key].FinalFilePath
