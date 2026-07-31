@@ -32,6 +32,9 @@ func (noopRecorder) SetImportCDCLastEventApplied(importerRole string)           
 // export snapshot
 func (noopRecorder) RecordExportSnapshotRowCount(exporterRole string, t sqlname.NameTuple, cumulative int64) {
 }
+
+func (noopRecorder) RecordExportSnapshotSegmentRowCount(exporterRole string, t sqlname.NameTuple, segmentKey string, cumulative int64) {
+}
 func (noopRecorder) SetExportSnapshotTableExpectedRows(exporterRole string, t sqlname.NameTuple, rows int64) {
 }
 func (noopRecorder) SetExportSnapshotTableStarted(exporterRole string, t sqlname.NameTuple)   {}

@@ -37,6 +37,7 @@ type Recorder interface {
 
 	// export snapshot
 	RecordExportSnapshotRowCount(exporterRole string, t sqlname.NameTuple, cumulative int64)
+	RecordExportSnapshotSegmentRowCount(exporterRole string, t sqlname.NameTuple, segmentKey string, cumulative int64)
 	SetExportSnapshotTableExpectedRows(exporterRole string, t sqlname.NameTuple, rows int64)
 	SetExportSnapshotTableStarted(exporterRole string, t sqlname.NameTuple)
 	SetExportSnapshotTableCompleted(exporterRole string, t sqlname.NameTuple)

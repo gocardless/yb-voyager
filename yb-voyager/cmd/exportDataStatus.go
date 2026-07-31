@@ -134,11 +134,17 @@ func initializeExportTableMetadata(tableList []sqlname.NameTuple) {
 // and do not appear empty until a table happens to start.
 func initExportSnapshotMetrics(tablesProgressMetadata map[string]*utils.TableProgressMetadata) {
 	rec := metrics.Get()
-	rec.SetExportSnapshotTablesTotal(exporterRole, len(tablesProgressMetadata))
+	tables := make(map[string]struct{})
 	for _, md := range tablesProgressMetadata {
+		key := md.TableName.ForKey()
+		if _, ok := tables[key]; ok {
+			continue
+		}
+		tables[key] = struct{}{}
 		rec.SetExportSnapshotTableExpectedRows(exporterRole, md.TableName, md.CountTotalRows)
 		rec.RecordExportSnapshotRowCount(exporterRole, md.TableName, 0)
 	}
+	rec.SetExportSnapshotTablesTotal(exporterRole, len(tables))
 }
 
 func exportDataStatus(ctx context.Context, tablesProgressMetadata map[string]*utils.TableProgressMetadata, quitChan, exportSuccessChan chan bool, disablePb bool) {
@@ -261,7 +267,7 @@ func startExportPB(progressContainer *mpb.Progress, mapKey string, quitChan chan
 	go func() { //for continuously increasing PB percentage
 		for !pbr.IsComplete() {
 			pbr.SetExportedRowCount(tableMetadata.CountLiveRows)
-			metrics.Get().RecordExportSnapshotRowCount(exporterRole, tableMetadata.TableName, tableMetadata.CountLiveRows)
+			metrics.Get().RecordExportSnapshotSegmentRowCount(exporterRole, tableMetadata.TableName, mapKey, tableMetadata.CountLiveRows)
 			time.Sleep(time.Millisecond * 500)
 
 			if exporterRole == SOURCE_DB_EXPORTER_ROLE {
@@ -315,9 +321,8 @@ func startExportPB(progressContainer *mpb.Progress, mapKey string, quitChan chan
 	*/
 	readLines()
 
-	// Land the exported gauge exactly on the table total so the "% complete"
-	// panel reaches 100% (the polling goroutine above can stop a few rows short).
-	metrics.Get().RecordExportSnapshotRowCount(exporterRole, tableMetadata.TableName, tableMetadata.CountTotalRows)
+	// Record the final segment count because the polling goroutine above can stop a few rows short.
+	metrics.Get().RecordExportSnapshotSegmentRowCount(exporterRole, tableMetadata.TableName, mapKey, tableMetadata.CountLiveRows)
 	metrics.Get().SetExportSnapshotTableCompleted(exporterRole, tableMetadata.TableName)
 
 	// PB will not change from "100%" -> "completed" until this function call is made

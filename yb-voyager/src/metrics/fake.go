@@ -92,6 +92,9 @@ func (r *RecordingRecorder) SetImportCDCLastEventApplied(importerRole string) {
 // export snapshot
 func (r *RecordingRecorder) RecordExportSnapshotRowCount(exporterRole string, t sqlname.NameTuple, cumulative int64) {
 }
+
+func (r *RecordingRecorder) RecordExportSnapshotSegmentRowCount(exporterRole string, t sqlname.NameTuple, segmentKey string, cumulative int64) {
+}
 func (r *RecordingRecorder) SetExportSnapshotTableExpectedRows(exporterRole string, t sqlname.NameTuple, rows int64) {
 	r.ExportTableExpectedRows[key(t)] = rows
 }

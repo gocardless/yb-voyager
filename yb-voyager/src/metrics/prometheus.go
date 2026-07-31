@@ -233,8 +233,15 @@ func (p *PrometheusRecorder) exportSnapshotLabelValues(exporterRole string, t sq
 // export snapshot
 
 func (p *PrometheusRecorder) RecordExportSnapshotRowCount(exporterRole string, t sqlname.NameTuple, cumulative int64) {
-	schema, table := t.ForKeyTableSchema()
-	key := exporterRole + "." + schema + "." + table
+	p.recordExportSnapshotRowCount(exporterRole, t, t.ForKey(), cumulative)
+}
+
+func (p *PrometheusRecorder) RecordExportSnapshotSegmentRowCount(exporterRole string, t sqlname.NameTuple, segmentKey string, cumulative int64) {
+	p.recordExportSnapshotRowCount(exporterRole, t, segmentKey, cumulative)
+}
+
+func (p *PrometheusRecorder) recordExportSnapshotRowCount(exporterRole string, t sqlname.NameTuple, segmentKey string, cumulative int64) {
+	key := exporterRole + "." + segmentKey
 	p.exportRowsMu.Lock()
 	prev := p.exportRowsLast[key]
 	if cumulative < prev { // source restarted / recount: treat cumulative as a fresh baseline

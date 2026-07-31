@@ -89,6 +89,18 @@ yb_voyager_import_data_snapshot_rows_total{importer_role="target_db_importer",mi
 			r.exportSnapshotRows.WithLabelValues("uuid-1", "sess-1", "source_db_exporter", "orders", "public")))
 	})
 
+	t.Run("export snapshot rows aggregate interleaved segments", func(t *testing.T) {
+		r := NewPrometheusRecorder("uuid-1", "sess-1")
+		tup := newTupleForTest("public", "orders")
+		r.RecordExportSnapshotSegmentRowCount("source_db_exporter", tup, "public.orders::seg0", 100)
+		r.RecordExportSnapshotSegmentRowCount("source_db_exporter", tup, "public.orders::seg1", 50)
+		r.RecordExportSnapshotSegmentRowCount("source_db_exporter", tup, "public.orders::seg0", 200)
+		r.RecordExportSnapshotSegmentRowCount("source_db_exporter", tup, "public.orders::seg1", 150)
+
+		g := r.exportSnapshotRows.WithLabelValues("uuid-1", "sess-1", "source_db_exporter", "orders", "public")
+		assert.Equal(t, float64(350), testutil.ToFloat64(g))
+	})
+
 	t.Run("export cdc events", func(t *testing.T) {
 		r := NewPrometheusRecorder("uuid-1", "sess-1")
 		r.RecordExportCDCEvents("source_db_exporter", 50)

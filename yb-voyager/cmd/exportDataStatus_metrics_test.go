@@ -39,3 +39,23 @@ func TestInitExportSnapshotMetrics_RegistersAllTables(t *testing.T) {
 	assert.Equal(t, int64(0), rec.ExportTableExpectedRows["public.payments"])
 	assert.Equal(t, int64(2), rec.ExportSnapshotTablesTotal[SOURCE_DB_EXPORTER_ROLE])
 }
+
+func TestInitExportSnapshotMetrics_DeduplicatesSegmentedTables(t *testing.T) {
+	rec := metrics.NewRecordingRecorder()
+	prev := metrics.Get()
+	defer metrics.SetRecorder(prev)
+	metrics.SetRecorder(rec)
+
+	prevRole := exporterRole
+	defer func() { exporterRole = prevRole }()
+	exporterRole = SOURCE_DB_EXPORTER_ROLE
+
+	table := newExportMetricsTestTuple("public", "orders")
+	initExportSnapshotMetrics(map[string]*utils.TableProgressMetadata{
+		"public.orders::seg0": {TableName: table, CountTotalRows: 1000},
+		"public.orders::seg1": {TableName: table, CountTotalRows: 1000},
+	})
+
+	assert.Equal(t, int64(1000), rec.ExportTableExpectedRows["public.orders"])
+	assert.Equal(t, int64(1), rec.ExportSnapshotTablesTotal[SOURCE_DB_EXPORTER_ROLE])
+}
