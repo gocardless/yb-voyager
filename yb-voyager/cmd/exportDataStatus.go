@@ -53,6 +53,18 @@ type ExportSnapshotStatus struct {
 	Tables map[string]*TableExportStatus `json:"tables"`
 }
 
+// ensureSnapshotStatusEntry lazily inserts a status entry for keys that only
+// become known after chunked segments are expanded (see expandSegmentEntries),
+// so per-segment progress keys have somewhere to record status.
+func ensureSnapshotStatusEntry(status *ExportSnapshotStatus, key string, tableName string) {
+	if status.Tables == nil {
+		status.Tables = map[string]*TableExportStatus{}
+	}
+	if status.Tables[key] == nil {
+		status.Tables[key] = &TableExportStatus{TableName: tableName}
+	}
+}
+
 func (e *ExportSnapshotStatus) GetTableStatusByTableName(tableName string) []*TableExportStatus {
 	var tableStatus []*TableExportStatus
 	for _, v := range e.Tables {
@@ -167,7 +179,7 @@ func exportDataStatus(ctx context.Context, tablesProgressMetadata map[string]*ut
 				go startExportPB(progressContainer, key, quitChan2, disablePb)
 			} else if tablesProgressMetadata[key].Status == utils.TABLE_MIGRATION_DONE || (tablesProgressMetadata[key].Status == utils.TABLE_MIGRATION_NOT_STARTED && safeExit) {
 				tablesProgressMetadata[key].Status = utils.TABLE_MIGRATION_COMPLETED
-				exportedTables = append(exportedTables, key)
+				exportedTables = append(exportedTables, tablesProgressMetadata[key].TableName.ForMinOutput())
 				doneCount++
 
 				if exporterRole == SOURCE_DB_EXPORTER_ROLE {
@@ -209,8 +221,8 @@ func exportDataStatus(ctx context.Context, tablesProgressMetadata map[string]*ut
 }
 
 func startExportPB(progressContainer *mpb.Progress, mapKey string, quitChan chan bool, disablePb bool) {
-	tableName := mapKey
 	tableMetadata := tablesProgressMetadata[mapKey]
+	tableName := tableMetadata.TableName.ForMinOutput()
 
 	pbr := pbreporter.NewExportPB(progressContainer, tableName, disablePb)
 	// initialize PB total with identified approx row count
@@ -253,7 +265,7 @@ func startExportPB(progressContainer *mpb.Progress, mapKey string, quitChan chan
 			time.Sleep(time.Millisecond * 500)
 
 			if exporterRole == SOURCE_DB_EXPORTER_ROLE {
-				exportDataTableMetrics := createUpdateExportedRowCountEventList([]string{tableName})
+				exportDataTableMetrics := createUpdateExportedRowCountEventList([]string{mapKey})
 				// The metrics are sent after evry 5 secs in implementation of UpdateExportedRowCount
 				controlPlane.UpdateExportedRowCount(exportDataTableMetrics)
 			}
@@ -323,6 +335,7 @@ func updateExportSnapshotStatus(ctx context.Context, tableMetadata map[string]*u
 		default:
 			err := exportSnapshotStatusFile.Update(func(status *ExportSnapshotStatus) {
 				for key := range tablesProgressMetadata {
+					ensureSnapshotStatusEntry(status, key, tablesProgressMetadata[key].TableName.ForKey())
 					status.Tables[key].ExportedRowCountSnapshot = tablesProgressMetadata[key].CountLiveRows
 					status.Tables[key].Status = utils.TableMetadataStatusMap[tablesProgressMetadata[key].Status]
 					status.Tables[key].FileName = tablesProgressMetadata[key].FinalFilePath

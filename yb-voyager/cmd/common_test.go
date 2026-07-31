@@ -26,11 +26,19 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/yugabyte/yb-voyager/yb-voyager/src/constants"
 	"github.com/yugabyte/yb-voyager/yb-voyager/src/migassessment"
+	"github.com/yugabyte/yb-voyager/yb-voyager/src/namereg"
 	"github.com/yugabyte/yb-voyager/yb-voyager/src/utils"
+	"github.com/yugabyte/yb-voyager/yb-voyager/src/utils/sqlname"
 	"github.com/yugabyte/yb-voyager/yb-voyager/src/ybversion"
 	testutils "github.com/yugabyte/yb-voyager/yb-voyager/test/utils"
 )
+
+func mkNameTuple(schema, table string) sqlname.NameTuple {
+	obj := sqlname.NewObjectName(constants.POSTGRESQL, "public", schema, table)
+	return sqlname.NameTuple{SourceName: obj, CurrentName: obj}
+}
 
 func TestAssessmentReportStructs(t *testing.T) {
 	tests := []struct {
@@ -761,4 +769,61 @@ func Int64Ptr(i int64) *int64 {
 
 func StringPtr(s string) *string {
 	return &s
+}
+
+func TestParseTocLineChunkedAndPlain(t *testing.T) {
+	// Layout confirmed against a real chunked dump: dumpid; tableoid oid DESC... schema table owner
+	plain := "3725; 0 16594 TABLE DATA public categories ds2"
+	chunk1 := "3726; 0 16594 TABLE DATA (pages 0:0) public categories ds2"
+	chunk2 := "3727; 0 16594 TABLE DATA (pages 1:1) public categories ds2"
+
+	for _, line := range []string{plain, chunk1, chunk2} {
+		schema, table, owner, isTableData, dumpID := parseTocDataLine(line)
+		assert.True(t, isTableData)
+		assert.Equal(t, "public", schema)
+		assert.Equal(t, "categories", table)
+		assert.Equal(t, "ds2", owner)
+		assert.NotEmpty(t, dumpID)
+	}
+	_, _, _, isTableData, _ := parseTocDataLine("100; 0 1 SEQUENCE public s ds2")
+	assert.False(t, isTableData)
+}
+
+func TestMappingCollectsAllSegments(t *testing.T) {
+	namereg.NameReg = namereg.NameRegistry{
+		SourceDBType:              constants.POSTGRESQL,
+		DefaultSourceDBSchemaName: "public",
+		SourceDBTableNames:        map[string][]string{"public": {"categories"}},
+	}
+	lines := []string{
+		"3726; 0 16594 TABLE DATA (pages 0:0) public categories ds2",
+		"3727; 0 16594 TABLE DATA (pages 1:1) public categories ds2",
+	}
+	m := buildTableFileMap(lines)
+	key := mkNameTuple("public", "categories").ForKey()
+	assert.ElementsMatch(t, []string{"3726.dat", "3727.dat"}, m[key])
+}
+
+func TestUpdateFilePathsExpandsSegments(t *testing.T) {
+	tableName := mkNameTuple("public", "categories")
+	md := map[string]*utils.TableProgressMetadata{
+		"public.categories": {TableName: tableName},
+	}
+	fileMap := map[string][]string{tableName.ForKey(): {"3726.dat", "3727.dat"}}
+	expandSegmentEntries(md, "/exp", fileMap)
+
+	keys := utils.GetSortedKeys(md)
+	assert.Equal(t, []string{"public.categories::seg0", "public.categories::seg1"}, keys)
+	assert.Equal(t, "/exp/data/categories_data.sql", md["public.categories::seg0"].FinalFilePath)
+	assert.Equal(t, "/exp/data/categories_data.1.sql", md["public.categories::seg1"].FinalFilePath)
+	for _, k := range keys {
+		assert.Equal(t, "categories", md[k].TableName.ForMinOutput())
+	}
+}
+
+func TestEnsureSnapshotStatusEntry(t *testing.T) {
+	s := &ExportSnapshotStatus{}
+	ensureSnapshotStatusEntry(s, "public.categories::seg1", "public.categories")
+	assert.NotNil(t, s.Tables["public.categories::seg1"])
+	assert.Equal(t, "public.categories", s.Tables["public.categories::seg1"].TableName)
 }
